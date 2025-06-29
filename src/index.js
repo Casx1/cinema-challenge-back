@@ -1,56 +1,52 @@
-const express = require('express');
-const cors = require('cors');
-const dotenv = require('dotenv');
-const connectDB = require('./config/db');
-const routes = require('./routes');
-const swaggerDocs = require('./config/swagger');
-const { notFound, errorHandler } = require('./middleware/error');
+import axios from 'axios';
 
-// Load environment variables
-dotenv.config();
+const API_BASE_URL = import.meta.env.VITE_API_URL;
 
-// Create Express app
-const app = express();
-
-// Middleware
-app.use(cors());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-
-// Welcome route
-app.get('/', (req, res) => {
-  res.json({ 
-    message: 'Welcome to Cinema App API',
-    documentation: '/api/v1/docs' 
-  });
+const V = axios.create({
+  baseURL: API_BASE_URL,
+  headers: {
+    'Content-Type': 'application/json',
+  },
+  timeout: 10000,
 });
 
-// Handle Socket.IO requests with a catch-all handler (prevent 404 errors)
-app.use('/socket.io', (req, res) => {
-  res.status(200).json({
-    message: 'Socket.IO not available',
-    note: 'This API does not support WebSocket connections'
-  });
-});
+// Interceptor para log e autenticação
+V.interceptors.request.use(
+  (config) => {
+    console.log(`API Request: ${config.method.toUpperCase()} ${config.baseURL}${config.url}`, config);
+    const token = localStorage.getItem('token');
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+    return config;
+  },
+  (error) => {
+    console.error('Request error:', error);
+    return Promise.reject(error);
+  }
+);
 
-// Initialize Swagger documentation
-swaggerDocs(app);
+// Interceptor de resposta
+V.interceptors.response.use(
+  (response) => {
+    console.log(`API Response: ${response.status} for ${response.config.url}`, response.data);
+    return response;
+  },
+  (error) => {
+    console.error('API Error:', {
+      url: error.config?.url,
+      status: error.response?.status,
+      data: error.response?.data,
+      message: error.message
+    });
 
-// API Routes
-app.use('/api/v1', routes);
+    if (error.response && error.response.status === 401) {
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
+      window.location.href = '/login';
+    }
+    return Promise.reject(error);
+  }
+);
 
-// Error handling middleware
-app.use(notFound);
-app.use(errorHandler);
-
-// Define port
-const PORT = process.env.PORT || 3000;
-
-// Connect to MongoDB and start server
-connectDB().then(() => {
-  app.listen(PORT, () => {
-    console.log(`Server is running on port ${PORT}`);
-    console.log(`API available at http://localhost:${PORT}/api/v1`);
-    console.log(`API documentation available at http://localhost:${PORT}/api/v1/docs`);
-  });
-});
+export default V;
